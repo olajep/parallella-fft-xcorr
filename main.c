@@ -134,11 +134,14 @@ out:
 int main(int argc, char *argv[])
 {
 	int ret = 0;
+	int i;
 	char *file1 = "A.jpg";
 	char *file2 = "B.jpg";
-	uint8_t *A = NULL, *B = NULL;
+	float *A = NULL, *B = NULL;
+	uint8_t *A_jpg_data = NULL;
+	uint8_t *B_jpg_data = NULL;
+	unsigned long A_jpg_sz = 0, B_jpg_sz = 0;
 	int width, height;
-	float corr = 0;
 
 	if (!initialized) {
 		if (!fftimpl_init()) {
@@ -155,24 +158,38 @@ int main(int argc, char *argv[])
 	if (argc > 2)
 		file2 = argv[2];
 
-	A = jpeg_file_to_grayscale_int(file1, &width, &height);
+	struct jpeg_image jpgimg[10];
+
+	float corr[10];
+
+	A = jpeg_file_to_grayscale(file1, &width, &height);
 	if (!A) {
 		ret = 1;
 		goto out;
 	}
+	A_jpg_data = (uint8_t *) grayscale_to_jpeg(A, width, height, &A_jpg_sz);
 
-	B = jpeg_file_to_grayscale_int(file2, &width, &height);
+	B = jpeg_file_to_grayscale(file2, &width, &height);
 	if (!B) {
 		ret = 2;
 		goto free_A;
 	}
+	B_jpg_data = (uint8_t *) grayscale_to_jpeg(B, width, height, &B_jpg_sz);
 
-	if (!fftimpl_xcorr(A, B, 1, width, height, &corr)) {
+	jpgimg[0].data = A_jpg_data;
+	jpgimg[0].size = A_jpg_sz;
+	for (i = 1; i < 10; i++) {
+		jpgimg[i].data = i % 2 ? A_jpg_data : B_jpg_data;
+		jpgimg[i].size = i % 2 ? A_jpg_sz : B_jpg_sz;
+	}
+
+	if (!calculateXCorr2(&jpgimg[0], &jpgimg[1], 9, corr)) {
 		fprintf(stderr, "ERROR: xcorr failed\n");
 		ret = 3;
 	}
 
-	printf("%f,%s,%s\n", corr, file1, file2);
+	for (i = 0; i < 9; i++)
+		printf("%f,%s,%s\n", corr[i], file1, file2);
 
 	free(B);
 free_A:
