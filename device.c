@@ -241,10 +241,10 @@ float global_max(void *p_comm, int nprocs, int rank,
 		ct = (ct + 1) % nprocs;
 	}
 
-	return max;
-
 	coprthr_tls_brk(memfree);
+	return max;
 }
+
 
 
 void fft2d(void *comm, int nprocs, int rank, unsigned int nlocal,
@@ -294,6 +294,8 @@ my_thread (void *p) {
 	int i,j,k,l;
 	int row;
 
+	const float divider = 1.0f/255.0f;
+
 	int nprocs;
 	int myrank;
 
@@ -317,7 +319,8 @@ my_thread (void *p) {
 	void *memfree = coprthr_tls_sbrk(0);
 
 	uint16_t *brp = (uint16_t *) coprthr_tls_sbrk((brp_sz+7) & ~7);
-        memset(brp, 0, brp_sz);
+	for (i = 0; i < brp_sz / sizeof(*brp); i++)
+		brp[i] = 0;
 
 	for(i = 0, k = 0; i < args.n; i++) {
 		int x = i;
@@ -333,7 +336,14 @@ my_thread (void *p) {
 	/* Copy IMG A (reference image) to local memory */
 	cfloat* l_tmp_fft  = (cfloat *) coprthr_tls_sbrk(l_fft_sz);
 	e_dma_copy(l_tmp_fft, args.ref_bitmap + myrank * nlocal * args.n,
-		   l_fft_sz);
+		   nlocal * args.n * sizeof(uint8_t));
+
+	// Unpack uint8_t -> cfloat
+	uint8_t *bref_ptr = (uint8_t*) l_tmp_fft;
+
+	int last = nlocal * args.n - 1;
+	for (i = last; i >= 0; i--)
+		l_tmp_fft[i] = ((float) bref_ptr[i]) * divider;
 
 	/* Normalize signal to zero out DC component */
 	normalize2(comm, nprocs, myrank, nlocal, args.n, l_tmp_fft);
@@ -360,12 +370,36 @@ my_thread (void *p) {
 	/* Iterate over all bitmaps in args.bitmaps */
 	for (nbitmap = 0; nbitmap < args.nbitmaps; nbitmap++) {
 
-		// offset to bitmap
-		cfloat *g_cmp_bmp = args.bitmaps + args.n * args.n * nbitmap;
+		const int width = args.n / 2;
+		const int height = args.n / 2;
+		// offset to bitmap (assume needs zero padding)
+		uint8_t *g_cmp_bmp = args.bitmaps + nbitmap * width * height;
 
 		// FFT IMG B
-		memset(l_tmp_fft, 0, l_fft_sz);
-		e_dma_copy(l_tmp_fft, g_cmp_bmp + myrank * nlocal * args.n, l_fft_sz);
+		if (myrank < nprocs / 2)
+			e_dma_copy(l_tmp_fft, g_cmp_bmp + myrank * nlocal * width, nlocal*width * sizeof(*g_cmp_bmp));
+
+		uint8_t *bptr = (uint8_t *) l_tmp_fft;
+		cfloat *cptr = (cfloat *) l_tmp_fft;
+
+		if (myrank < nprocs / 2) {
+			// zeropad (lower part always zero)
+			for (i = nlocal - 1; i > 0; i--) {
+				for (j = width -1 ; j >= 0; j--)
+					bptr[i * args.n + j] = bptr[i * width + j];
+			}
+			for (i = 0; i < nlocal; i++) {
+				for (j = width; j < args.n; j++)
+					bptr[i * args.n + j] = 0;
+			}
+			// Unpack image (uint8_t -> cfloat) backwards
+			int last = nlocal * args.n - 1;
+			for (i = last; i >= 0; i--)
+				l_tmp_fft[i] = ((float) bptr[i]) * divider;
+		} else {
+			for (i = 0; i < nlocal * args.n; i++)
+				cptr[i] = 0;
+		}
 
 		/* Normalize signal to zero out DC component */
 		normalize2(comm, nprocs, myrank, nlocal, args.n, l_tmp_fft);

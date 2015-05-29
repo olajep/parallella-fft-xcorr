@@ -7,12 +7,14 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Internal */
 #include "demo.h"
+
+/* API */
 #include "libfft-demo.h"
 
 bool initialized = false;
 
-#define MAX_BITMAPS 96
 #define IMG_W 64
 #define IMG_H 64
 
@@ -23,7 +25,7 @@ bool calculateXCorr(uint8_t *jpeg1, size_t jpeg1_size,
 		    float *corr)
 {
 	bool ret = true;
-	float *A, *B;
+	uint8_t *A, *B;
 	int width, height;
 
 	if (!initialized) {
@@ -35,13 +37,13 @@ bool calculateXCorr(uint8_t *jpeg1, size_t jpeg1_size,
 		initialized = true;
 	}
 
-	A = jpeg_to_grayscale(jpeg1, jpeg1_size, &width, &height);
+	A = jpeg_to_grayscale_int(jpeg1, jpeg1_size, &width, &height);
 	if (!A) {
 		ret = false;
 		goto out;
 	}
 
-	B = jpeg_to_grayscale(jpeg2, jpeg2_size, &width, &height);
+	B = jpeg_to_grayscale_int(jpeg2, jpeg2_size, &width, &height);
 	if (!B) {
 		ret = false;
 		goto free_A;
@@ -65,10 +67,10 @@ bool calculateXCorr2(struct jpeg_image *ref_img, struct jpeg_image *compare,
 		     int ncompare, float *corr)
 {
 	bool ret = true;
-	float *ref, *tmp;
+	uint8_t *ref, *tmp;
 	int width, height;
 	int i;
-	float *img_buf;
+	uint8_t *img_buf;
 
 	if (!initialized) {
 		if (!fftimpl_init()) {
@@ -79,11 +81,11 @@ bool calculateXCorr2(struct jpeg_image *ref_img, struct jpeg_image *compare,
 		initialized = true;
 	}
 
-	ref = jpeg_to_grayscale(ref_img->data, ref_img->size, &width, &height);
+	ref = jpeg_to_grayscale_int(ref_img->data, ref_img->size, &width, &height);
 	if (!ref)
 		return false;
 
-	img_buf = (float *) malloc(MAX_BITMAPS * IMG_W * IMG_H * sizeof(float));
+	img_buf = (uint8_t *) malloc(MAX_BITMAPS * IMG_W * IMG_H * sizeof(*img_buf));
 
 	if (width != IMG_W || height != IMG_H) {
 		fprintf(stderr,
@@ -95,7 +97,7 @@ bool calculateXCorr2(struct jpeg_image *ref_img, struct jpeg_image *compare,
 
 	while (ncompare) {
 		for (i = 0; i < MAX_BITMAPS && ncompare; i++, ncompare--, compare++) {
-			tmp = jpeg_to_grayscale(compare->data, compare->size, &width, &height);
+			tmp = jpeg_to_grayscale_int(compare->data, compare->size, &width, &height);
 			if (!tmp) {
 				ret = false;
 				goto out;
@@ -110,7 +112,7 @@ bool calculateXCorr2(struct jpeg_image *ref_img, struct jpeg_image *compare,
 				goto out;
 			}
 			memcpy(&img_buf[IMG_W * IMG_H * i], tmp,
-					IMG_W * IMG_H * sizeof(float));
+					IMG_W * IMG_H * sizeof(*img_buf));
 
 			free(tmp);
 		}
@@ -186,7 +188,7 @@ int main(int argc, char *argv[])
 		ret = 3;
 	}
 
-	for (i = 0; i < 10; i++)
+	for (i = 0; i < 9; i++)
 		printf("%f,%s,%s\n", corr[i], file1, file2);
 
 	free(B);
